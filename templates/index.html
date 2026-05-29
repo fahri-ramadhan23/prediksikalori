@@ -20,6 +20,16 @@
             <p class="text-rose-400 text-sm">Predictive Analytics Platform (Flask Backend)</p>
           </div>
         </div>
+        <div class="flex items-center gap-4">
+          <div class="text-right hidden md:block">
+            <p class="text-slate-400 text-xs">Selamat Datang,</p>
+            <p class="text-white font-semibold">{{ fullname }} 👋</p>
+          </div>
+          <a href="{{ url_for('logout') }}" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-sm font-semibold rounded-xl border border-slate-700 transition-all active:scale-95 flex items-center gap-2">
+            <span>Keluar</span>
+            <span>🚪</span>
+          </a>
+        </div>
       </header>
 
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -75,6 +85,48 @@
           </div>
         </div>
       </div>
+
+      <!-- HISTORY AREA -->
+      <div class="glass p-6">
+        <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+          <span>📊</span> Riwayat Prediksi Kalori
+        </h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm text-slate-300">
+            <thead class="text-xs uppercase text-slate-400 border-b border-slate-800 bg-slate-950/40">
+              <tr>
+                <th class="py-3 px-4">Waktu</th>
+                <th class="py-3 px-4">Gender</th>
+                <th class="py-3 px-4">Umur</th>
+                <th class="py-3 px-4">Berat</th>
+                <th class="py-3 px-4">Durasi</th>
+                <th class="py-3 px-4">BPM</th>
+                <th class="py-3 px-4 text-rose-400">Kalori</th>
+              </tr>
+            </thead>
+            <tbody id="history-table-body" class="divide-y divide-slate-800/50">
+              {% if history %}
+                {% for row in history %}
+                <tr class="hover:bg-slate-900/30 transition-all">
+                  <td class="py-3 px-4 font-mono text-xs">{{ row.timestamp }}</td>
+                  <td class="py-3 px-4">{{ row.gender }}</td>
+                  <td class="py-3 px-4">{{ row.age }} thn</td>
+                  <td class="py-3 px-4">{{ row.weight }} kg</td>
+                  <td class="py-3 px-4">{{ row.duration }} mnt</td>
+                  <td class="py-3 px-4">{{ row.bpm }} bpm</td>
+                  <td class="py-3 px-4 font-bold text-white">{{ row.predicted_calories }} kcal</td>
+                </tr>
+                {% endfor %}
+              {% else %}
+                <tr id="no-history-row">
+                  <td colspan="7" class="py-8 text-center text-slate-500 italic">Belum ada riwayat prediksi. Coba lakukan prediksi pertama Anda!</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
     <!-- Diubah menggunakan sintaks url_for Flask -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>

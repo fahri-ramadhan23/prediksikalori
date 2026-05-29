@@ -89,6 +89,12 @@ async function calculate() {
       })
     });
 
+    if (response.status === 401) {
+      alert("Sesi Anda telah berakhir. Anda akan diarahkan ke halaman login.");
+      window.location.href = '/login';
+      return;
+    }
+
     const data = await response.json();
 
     if (data.status === 'success') {
@@ -101,6 +107,35 @@ async function calculate() {
 
       updateRecommendation(bpm, durationTotalMinutes);
       
+      // Tambahkan ke tabel riwayat secara dinamis
+      if (data.new_entry) {
+        const tableBody = document.getElementById("history-table-body");
+        const noHistoryRow = document.getElementById("no-history-row");
+        if (noHistoryRow) {
+          noHistoryRow.remove();
+        }
+        
+        const entry = data.new_entry;
+        const newRowHTML = `
+          <tr class="hover:bg-slate-900/30 transition-all opacity-0" style="transition: opacity 0.5s ease-in-out;">
+            <td class="py-3 px-4 font-mono text-xs">${entry.timestamp}</td>
+            <td class="py-3 px-4">${entry.gender}</td>
+            <td class="py-3 px-4">${entry.age} thn</td>
+            <td class="py-3 px-4">${entry.weight} kg</td>
+            <td class="py-3 px-4">${entry.duration} mnt</td>
+            <td class="py-3 px-4">${entry.bpm} bpm</td>
+            <td class="py-3 px-4 font-bold text-white">${entry.predicted_calories} kcal</td>
+          </tr>
+        `;
+        tableBody.insertAdjacentHTML('afterbegin', newRowHTML);
+        
+        // Efek fade-in halus
+        const newRow = tableBody.firstElementChild;
+        setTimeout(() => {
+          newRow.classList.remove("opacity-0");
+        }, 50);
+      }
+      
       // Kembalikan tombol ke keadaan semula
       const btn = document.getElementById("predict-btn");
       const btnText = document.getElementById("btn-text");
@@ -110,7 +145,7 @@ async function calculate() {
       document.getElementById("result-area").scrollIntoView({ behavior: 'smooth', block: 'center' });
     } else {
       console.error("Error dari server:", data.message);
-      alert("Gagal melakukan prediksi. Cek console log.");
+      alert("Gagal melakukan prediksi: " + data.message);
       resetButton();
     }
   } catch (error) {

@@ -9,6 +9,9 @@ app = Flask(__name__)
 app.secret_key = 'a_very_secret_key_123456'
 DATABASE = 'database.db'
 
+# Mendeteksi URL Database PostgreSQL dari platform hosting seperti Railway
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
 # Bobot hasil regresi linear (dipindahkan dari frontend ke backend)
 WEIGHTS = {
     'intercept': -315,
@@ -20,14 +23,59 @@ WEIGHTS = {
 }
 
 def get_db_connection():
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if DATABASE_URL:
+        # Mengimpor modul PostgreSQL secara dinamis agar tidak membebani eksekusi lokal tanpa dependensi postgres
+        import psycopg2
+        import psycopg2.extras
+        # DictCursor memungkinkan akses baris dengan nama kolom, seperti sqlite3.Row
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.DictCursor)
+        return conn
+    else:
+        conn = sqlite3.connect(DATABASE)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+def execute_sql(conn, query, params=()):
+    if DATABASE_URL:
+        # Mengubah penanda parameter SQLite (?) menjadi format PostgreSQL (%s)
+        query = query.replace('?', '%s')
+    cur = conn.cursor()
+    cur.execute(query, params)
+    return cur
 
 def init_db():
-    with get_db_connection() as conn:
-        # Buat tabel users
-        conn.execute('''
+    if DATABASE_URL:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Membuat tabel PostgreSQL
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(100) UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                fullname VARCHAR(100) NOT NULL
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS prediction_history (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                gender VARCHAR(20) NOT NULL,
+                age INTEGER NOT NULL,
+                weight REAL NOT NULL,
+                duration REAL NOT NULL,
+                bpm INTEGER NOT NULL,
+                predicted_calories INTEGER NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    else:
+        # Membuat tabel SQLite
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
@@ -35,8 +83,7 @@ def init_db():
                 fullname TEXT NOT NULL
             )
         ''')
-        # Buat tabel prediction_history
-        conn.execute('''
+        cur.execute('''
             CREATE TABLE IF NOT EXISTS prediction_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -47,10 +94,11 @@ def init_db():
                 bpm INTEGER NOT NULL,
                 predicted_calories INTEGER NOT NULL,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (id)
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
             )
         ''')
         conn.commit()
+        conn.close()
 
 # Inisialisasi database saat aplikasi dimulai
 init_db()
@@ -63,13 +111,31 @@ def home():
     
     # Ambil riwayat prediksi dari database untuk user yang sedang aktif
     conn = get_db_connection()
-    history = conn.execute('''
+    history_rows = execute_sql(conn, '''
         SELECT gender, age, weight, duration, bpm, predicted_calories, timestamp 
         FROM prediction_history 
         WHERE user_id = ? 
         ORDER BY timestamp DESC
     ''', (session['user_id'],)).fetchall()
     conn.close()
+    
+    # Format timestamp ke string berformat standar agar aman dari error tipe data JSON/Jinja
+    history = []
+    for row in history_rows:
+        ts = row['timestamp']
+        if ts is not None and not isinstance(ts, str):
+            ts_str = ts.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            ts_str = ts or ""
+        history.append({
+            'gender': row['gender'],
+            'age': row['age'],
+            'weight': row['weight'],
+            'duration': row['duration'],
+            'bpm': row['bpm'],
+            'predicted_calories': row['predicted_calories'],
+            'timestamp': ts_str
+        })
     
     return render_template('index.html', fullname=session['fullname'], history=history)
 
@@ -92,7 +158,7 @@ def register():
             error = "Konfirmasi password tidak cocok."
         else:
             conn = get_db_connection()
-            user_exists = conn.execute('SELECT 1 FROM users WHERE username = ?', (username,)).fetchone()
+            user_exists = execute_sql(conn, 'SELECT 1 FROM users WHERE username = ?', (username,)).fetchone()
             
             if user_exists:
                 conn.close()
@@ -100,7 +166,7 @@ def register():
             else:
                 password_hash = generate_password_hash(password)
                 try:
-                    conn.execute('INSERT INTO users (username, password_hash, fullname) VALUES (?, ?, ?)',
+                    execute_sql(conn, 'INSERT INTO users (username, password_hash, fullname) VALUES (?, ?, ?)',
                                  (username, password_hash, fullname))
                     conn.commit()
                     conn.close()
@@ -133,7 +199,7 @@ def login():
             error = "Username dan password wajib diisi."
         else:
             conn = get_db_connection()
-            user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+            user = execute_sql(conn, 'SELECT * FROM users WHERE username = ?', (username,)).fetchone()
             conn.close()
             
             if user and check_password_hash(user['password_hash'], password):
@@ -185,7 +251,7 @@ def predict():
         
         # Simpan ke tabel prediction_history di database
         conn = get_db_connection()
-        conn.execute('''
+        execute_sql(conn, '''
             INSERT INTO prediction_history (user_id, gender, age, weight, duration, bpm, predicted_calories)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (
@@ -200,10 +266,21 @@ def predict():
         conn.commit()
         
         # Ambil timestamp dari entri yang baru dimasukkan untuk disinkronkan ke frontend
-        db_row = conn.execute('SELECT timestamp FROM prediction_history WHERE user_id = ? ORDER BY id DESC LIMIT 1', (session['user_id'],)).fetchone()
+        db_row = execute_sql(conn, '''
+            SELECT timestamp 
+            FROM prediction_history 
+            WHERE user_id = ? 
+            ORDER BY id DESC LIMIT 1
+        ''', (session['user_id'],)).fetchone()
         conn.close()
         
-        timestamp = db_row['timestamp'] if db_row else ""
+        ts_str = ""
+        if db_row and db_row['timestamp']:
+            ts = db_row['timestamp']
+            if not isinstance(ts, str):
+                ts_str = ts.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                ts_str = ts
         
         return jsonify({
             'status': 'success',
@@ -215,7 +292,7 @@ def predict():
                 'duration': duration_total_minutes,
                 'bpm': int(bpm),
                 'predicted_calories': result,
-                'timestamp': timestamp
+                'timestamp': ts_str
             }
         })
     except Exception as e:
